@@ -306,7 +306,7 @@ public sealed partial class PredicateInlay
                     goto finish; // round up
                     //if it's an operator, push an operator
                 case TokenType.Operator:
-                    branches.Add(new Oper(GetOp(in cTok)));
+                    branches.Add(new Oper(GetOp(in cTok).Value));
                     break;
                     //begin recording a new word
                 case TokenType.Word:
