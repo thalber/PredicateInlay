@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 public sealed class PredicateInlay
 {
     #region fields
-    //public Tree ltree;
+    public Tree ltree;
     //private Dictionary<string, del_Pred> WordBindings
     #endregion
     public PredicateInlay(string expression, del_FetchPred exchanger)
@@ -18,12 +18,14 @@ public sealed class PredicateInlay
         //ltree = new(tokens);
         int index = 0;
         var x = Parse(tokens, ref index);
-        Console.WriteLine(x.ToString(null, null));
+        ltree = new(x);
+        ltree.Populate(exchanger);
+        //Console.WriteLine(x.ToString(null, null));
     }
 
     private static IExpr Parse(Token[] tokens, ref int index)
     {
-        Group release = new Group();
+        //Group release = new Group();
         //int indent = 0;
         List<string> litStack = new();
         int prevWordIndex = index;
@@ -71,7 +73,7 @@ public sealed class PredicateInlay
             for (int i = branches.Count - 1; i >= 0; i--)
             {
                 var cBranch = branches[i];
-                if (cBranch is Oper o && o.TP == tp)
+                if (cBranch is Oper o && o.TP == tp && o.L is null && o.R is null)
                 {
                     if (i < 0 || i >= branches.Count) continue;
                     o.R = branches[i + 1];
@@ -82,19 +84,22 @@ public sealed class PredicateInlay
                     i--;
                 }
             }
-
         }
 
+        //foreach (var t in branchesFlat) Console.WriteLine(t.ToString(null, null));
+        //release.members = branches.ToArray();
+        return branches.Count switch
+        {
+            0 => new Stub(),
+            1 => branches[0],
+            _ => throw new InvalidOperationException("Can't abstract away group!"),
+        };
         void FinalizeWord()
         {
             branches.Add(MakeLeaf(tokens, in prevWordIndex));
             cWord = null;
             litStack.Clear();
         }
-
-        //foreach (var t in branchesFlat) Console.WriteLine(t.ToString(null, null));
-        release.members = branches.ToArray();
-        return release;
     }
 
     private static List<Token> Tokenize(string expression)
@@ -145,7 +150,16 @@ public sealed class PredicateInlay
     
     public class Tree
     {
-
+        public readonly IExpr root;
+        public Tree(IExpr root)
+        {
+            this.root = root;
+        }
+        public void Populate(del_FetchPred exchanger)
+        {
+            root.Populate(exchanger);
+        }
+        public bool Eval() => root.Eval();
     }
 
     public interface IExpr : IFormattable
@@ -154,7 +168,17 @@ public sealed class PredicateInlay
         public void Populate(del_FetchPred exchanger);
     }
     [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
+    public struct Stub : IExpr
+    {
+        public bool Eval()
+            => true;
 
+        public void Populate(del_FetchPred exchanger) { }
+
+        public string ToString(string format, IFormatProvider formatProvider)
+            => "{}";
+    }
+    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
     public struct Leaf : IExpr
     {
         public readonly string funcName;
@@ -187,12 +211,12 @@ public sealed class PredicateInlay
         public IExpr[] members;
         public bool Eval()
         {
-            throw new NotImplementedException();
+            throw new InvalidOperationException("Groups should not exist!");
         }
 
         public void Populate(del_FetchPred exchanger)
         {
-            throw new NotImplementedException();
+            throw new InvalidOperationException("Groups should not exist!");
         }
         public string ToString(string format, IFormatProvider formatProvider)
         {
@@ -262,8 +286,8 @@ public sealed class PredicateInlay
         DelimClose,
         Separator,
         Operator,
-        Word,
         Literal,
+        Word,
         //Discard
     }
 
@@ -306,8 +330,8 @@ public sealed class PredicateInlay
             TokenType.DelimClose => new Regex("[)\\]}]", RegexOptions.Compiled),
             TokenType.Separator => new Regex("[_\\s,]+", RegexOptions.Compiled),
             TokenType.Operator => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", RegexOptions.Compiled),
-            TokenType.Word => new Regex("[a-zA-Z]+", RegexOptions.Compiled),
             TokenType.Literal => new Regex("-{0,1}\\d+(\\.\\d+){0,1}|(?<=').+(?=')", RegexOptions.Compiled),
+            TokenType.Word => new Regex("[a-zA-Z]+", RegexOptions.Compiled),
             //TokenType.Discard => throw new NotImplementedException(),
             _ => throw new IndexOutOfRangeException("Supplied invalid token type"),
         };

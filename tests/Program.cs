@@ -7,14 +7,34 @@ internal class Program
     static void Main(string[] args)
     {
         string[] teststrings = new[] {
-            "a or b and c",
+            //"a or b and c 12 13 15 -16 'aegew2' -17.2",
             "(a or b) and c",
-            "(a or b xor orc -800) & d ^ e | func -0.15 0.17 and 'thing')" 
+            "(a) and (b) xor (c | d)",
+            "(a or b xor c -800) & d ^ e | (f -0.15 0.17 and g 'thing')",
         };
+
+        PredicateInlay.del_FetchPred exchanger = (name, args) =>
+        {
+            return name switch
+            {
+                "a" => () => true,
+                "b" => () => false,
+                "c" => () => true,
+                "d" => () => false,
+                "e" => () => true,
+                "f" => () => false,
+                "g" => () => true,
+                "h" => () => false,
+                _ => () => true
+            };
+        };
+
         foreach (string teststring in teststrings)
         {
+
             Console.WriteLine($"{teststring}\n- - - -\n");
-            PredicateInlay test = new(teststring, null);
+            PredicateInlay test = new(teststring, exchanger);
+            Console.WriteLine( test.ltree.Eval());
             Console.WriteLine("\n- - - -\n");
         }
     }
