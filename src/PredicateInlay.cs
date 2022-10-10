@@ -14,10 +14,87 @@ public sealed class PredicateInlay
     #endregion
     public PredicateInlay(string expression, del_FetchPred exchanger)
     {
-        List<Token> tokens = Tokenize(expression);
+        Token[] tokens = Tokenize(expression).ToArray();
         //ltree = new(tokens);
-        foreach (var t in tokens) Console.WriteLine($"{t.type}::{t.val}");
+        int index = 0;
+        var x = Parse(tokens, ref index);
+        Console.WriteLine(x.ToString(null, null));
+    }
 
+    private static IExpr Parse(Token[] tokens, ref int index)
+    {
+        Group release = new Group();
+        //int indent = 0;
+        List<string> litStack = new();
+        int prevWordIndex = index;
+        string? cWord = null;
+        //Token? prevWord = null
+        List<IExpr> branches = new();
+        //IExpr? PrevNode = null;
+        for (; index < tokens.Length; index++)
+        {
+            
+            //see what current token is
+            ref var cTok = ref tokens[index];
+            if (cTok.type is not TokenType.Literal && cWord is not null)
+            {
+                FinalizeWord();
+            }
+
+            switch (cTok.type)
+            {
+                //if it's a delim, recurse into an embedded group
+                case TokenType.DelimOpen:
+                    index += 1;
+                    branches.Add(Parse(tokens, ref index));
+                    break;
+                case TokenType.DelimClose:
+                    if (cWord is not null) FinalizeWord();
+                    goto finish;
+                //if it's an operator, push an operator
+                case TokenType.Operator:
+                    branches.Add(new Oper(GetOp(in cTok), null, null));
+                    break;
+                case TokenType.Word:
+                    prevWordIndex = index;
+                    cWord = cTok.val;
+                    break;
+                default:
+                    break;
+            }
+        }
+    finish:
+        if (cWord is not null) FinalizeWord();
+
+        foreach (Op tp in new[] { Op.AND, Op.XOR, Op.OR })
+        {
+            for (int i = branches.Count - 1; i >= 0; i--)
+            {
+                var cBranch = branches[i];
+                if (cBranch is Oper o && o.TP == tp)
+                {
+                    if (i < 0 || i >= branches.Count) continue;
+                    o.R = branches[i + 1];
+                    o.L = branches[i - 1];
+                    branches[i] = o;
+                    branches.RemoveAt(i + 1);
+                    branches.RemoveAt(i - 1);
+                    i--;
+                }
+            }
+
+        }
+
+        void FinalizeWord()
+        {
+            branches.Add(MakeLeaf(tokens, in prevWordIndex));
+            cWord = null;
+            litStack.Clear();
+        }
+
+        //foreach (var t in branchesFlat) Console.WriteLine(t.ToString(null, null));
+        release.members = branches.ToArray();
+        return release;
     }
 
     private static List<Token> Tokenize(string expression)
@@ -71,13 +148,14 @@ public sealed class PredicateInlay
 
     }
 
-    public interface BranchBase
+    public interface IExpr : IFormattable
     {
         public bool Eval();
         public void Populate(del_FetchPred exchanger);
     }
+    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
 
-    public struct Leaf : BranchBase
+    public struct Leaf : IExpr
     {
         public readonly string funcName;
         public readonly string[] args;
@@ -97,11 +175,16 @@ public sealed class PredicateInlay
         {
             myPredicate = exchanger(funcName, args);
         }
-    }
-    public struct Group : BranchBase
-    {
 
-        public readonly BranchBase[] members;
+        public string ToString(string format, IFormatProvider formatProvider)
+        {
+            return "Leaf " + funcName + "(" + (args.Length == 0 ? String.Empty : args.Aggregate((x, y) => $"{x}, {y}")) + ")";
+        }
+    }
+    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
+    public struct Group : IExpr
+    {
+        public IExpr[] members;
         public bool Eval()
         {
             throw new NotImplementedException();
@@ -111,12 +194,25 @@ public sealed class PredicateInlay
         {
             throw new NotImplementedException();
         }
+        public string ToString(string format, IFormatProvider formatProvider)
+        {
+            return "{" + (members.Length == 0 ? String.Empty : members.Select(x => x.ToString(null, null)).Aggregate((x, y) => $"{x}, {y}")) + "}";
+        }
     }
-    public struct Oper : BranchBase
+    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
+    public struct Oper : IExpr
     {
-        public readonly Op TP;
-        public readonly BranchBase L;
-        public readonly BranchBase R;
+        public Op TP;
+        public IExpr L;
+        public IExpr R;
+
+        public Oper(Op tP, IExpr l, IExpr r)
+        {
+            TP = tP;
+            L = l;
+            R = r;
+        }
+
         //public readonly 
         public bool Eval()
             => TP switch
@@ -132,6 +228,11 @@ public sealed class PredicateInlay
         {
             L.Populate(exchanger);
             R.Populate(exchanger);
+        }
+
+        public string ToString(string format, IFormatProvider formatProvider)
+        {
+            return $"[{L} {this.TP} {R}]";
         }
     }
 
@@ -170,6 +271,21 @@ public sealed class PredicateInlay
     public delegate del_Pred del_FetchPred(string name, params string[] args);
     #endregion
     #region statics
+    public static Leaf? MakeLeaf(Token[] tokens, in int index)
+    {
+        if (index < 0 || index >= tokens.Length) return null;
+        Token tok = tokens[index];
+        if (tok.type != TokenType.Word) return null;
+
+        List<string> args = new();
+        for (int i = index + 1; i < tokens.Length; i++)
+        {
+            var argque = tokens[i];
+            if (argque.type != TokenType.Literal) break;
+            args.Add(argque.val);
+        }
+        return new Leaf(tok.val, args.ToArray());
+    }
     public static Op GetOp(in Token t)
     {
         if (t.type != TokenType.Operator) throw new ArgumentException("Incorrect token type!");
@@ -189,7 +305,7 @@ public sealed class PredicateInlay
             TokenType.DelimOpen => new Regex("[([{]", RegexOptions.Compiled),
             TokenType.DelimClose => new Regex("[)\\]}]", RegexOptions.Compiled),
             TokenType.Separator => new Regex("[_\\s,]+", RegexOptions.Compiled),
-            TokenType.Operator => new Regex("!=|[&|^!]|(and\\s|or|xor|not)(?=\\s)", RegexOptions.Compiled),
+            TokenType.Operator => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", RegexOptions.Compiled),
             TokenType.Word => new Regex("[a-zA-Z]+", RegexOptions.Compiled),
             TokenType.Literal => new Regex("-{0,1}\\d+(\\.\\d+){0,1}|(?<=').+(?=')", RegexOptions.Compiled),
             //TokenType.Discard => throw new NotImplementedException(),
