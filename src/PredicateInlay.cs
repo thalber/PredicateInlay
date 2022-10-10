@@ -4,115 +4,231 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 /// <summary>
-/// Parses a string by logical expression operators (<c>()^|+ </c>) into an expression, then, using a supplied <see cref="del_FetchPred"/>, exchanges resulting substrings between logical operators into delegates, then evaluates expression on demand.
+/// Parses a string by logical expression operators (symbolic as well as words and/or/xor/not) into a treelike structure, then, using a supplied <see cref="del_FetchPred"/>, exchanges resulting substrings between logical operators into delegates, then evaluates expression on demand.
 /// </summary>
-public sealed class PredicateInlay
+public sealed partial class PredicateInlay
 {
+    //todo: massive amounts of cleanup
+    //todo: comments
+    //todo: compiling to a dynamic method?
     #region fields
-    public Tree ltree;
-    //private Dictionary<string, del_Pred> WordBindings
+    /// <summary>
+    /// Contains the Inlay's logic tree
+    /// </summary>
+    private readonly Tree TheTree;
     #endregion
     public PredicateInlay(string expression, del_FetchPred exchanger)
     {
+        //tokenize
         Token[] tokens = Tokenize(expression).ToArray();
-        //ltree = new(tokens);
+        //prepare the soil
         int index = 0;
         var x = Parse(tokens, ref index);
-        ltree = new(x);
-        ltree.Populate(exchanger);
-        //Console.WriteLine(x.ToString(null, null));
+        //plant the tree
+        TheTree = new(x);
+        //water it
+        TheTree.Populate(exchanger);
     }
-
-    private static IExpr Parse(Token[] tokens, ref int index)
+    #region nested
+    /// <summary>
+    /// Wraps compiled expression structure
+    /// </summary>
+    public class Tree
     {
-        //Group release = new Group();
-        //int indent = 0;
-        List<string> litStack = new();
-        int prevWordIndex = index;
-        string? cWord = null;
-        //Token? prevWord = null
-        List<IExpr> branches = new();
-        //IExpr? PrevNode = null;
-        for (; index < tokens.Length; index++)
-        {
-            
-            //see what current token is
-            ref var cTok = ref tokens[index];
-            if (cTok.type is not TokenType.Literal && cWord is not null)
-            {
-                FinalizeWord();
-            }
+        /// <summary>
+        /// root node
+        /// </summary>
+        public readonly IExpr root;
 
-            switch (cTok.type)
-            {
-                //if it's a delim, recurse into an embedded group
-                case TokenType.DelimOpen:
-                    index += 1;
-                    branches.Add(Parse(tokens, ref index));
-                    break;
-                case TokenType.DelimClose:
-                    if (cWord is not null) FinalizeWord();
-                    goto finish;
-                //if it's an operator, push an operator
-                case TokenType.Operator:
-                    branches.Add(new Oper(GetOp(in cTok)));
-                    break;
-                case TokenType.Word:
-                    prevWordIndex = index;
-                    cWord = cTok.val;
-                    break;
-                default:
-                    break;
-            }
+        public Tree(IExpr root)
+        {
+            this.root = root;
         }
-    finish:
-        if (cWord is not null) FinalizeWord();
-
-        foreach (Op tp in new[] { Op.NOT, Op.AND, Op.XOR, Op.OR })
+        /// <summary>
+        /// Fills the expression using given <see cref="del_FetchPred"/>
+        /// </summary>
+        /// <param name="exchanger"></param>
+        public void Populate(del_FetchPred exchanger)
         {
-            for (int i = branches.Count - 1; i >= 0; i--)
-            {
-                var cBranch = branches[i];
-                if (cBranch is Oper o && o.TP == tp && o.L is null && o.R is null)
-                {
-                    if (i < 0 || i >= branches.Count) continue;
-                    if (o.TP is not Op.NOT)
-                    {
-                        o.R = branches[i + 1];  
-                        o.L = branches[i - 1];
-                        branches[i] = o;
-                        branches.RemoveAt(i + 1);
-                        branches.RemoveAt(i - 1);
-                    }
-                    else
-                    {
-                        o.R = branches[i + 1];
-                        branches[i] = o;
-                        branches.RemoveAt(i + 1);
-                    }
-                    
-                    i--;
-                }
-            }
+            root.Populate(exchanger);
         }
-
-        //foreach (var t in branchesFlat) Console.WriteLine(t.ToString(null, null));
-        //release.members = branches.ToArray();
-        return branches.Count switch
+        /// <summary>
+        /// Runs evaluation on a tree
+        /// </summary>
+        /// <returns></returns>
+        public bool Eval() => root.Eval();
+    }
+    /// <summary>
+    /// Base interface for expressions
+    /// </summary>
+    public interface IExpr
+    {
+        /// <summary>
+        /// Evaluates a node and checks if it's true or false. Ran repeatedly.
+        /// </summary>
+        /// <returns></returns>
+        public bool Eval();
+        /// <summary>
+        /// Populates a node (and children nodes if any) using a given <see cref="del_FetchPred"/>. Ran once.
+        /// </summary>
+        /// <param name="exchanger"></param>
+        public void Populate(del_FetchPred exchanger);
+    }
+    /// <summary>
+    /// Empty node, always returns true
+    /// </summary>
+    [System.Diagnostics.DebuggerDisplay("{ToString()}")]
+    public struct Stub : IExpr
+    {
+        public bool Eval() => true;
+        public void Populate(del_FetchPred exchanger) { }
+        public override string ToString() => "{}";
+    }
+    /// <summary>
+    /// An end node; carries parameters passed when parsing and a final callback reference. If the callback is null, always true.
+    /// </summary>
+    [System.Diagnostics.DebuggerDisplay("{ToString()}")]
+    public struct Leaf : IExpr
+    {
+        public readonly string funcName;
+        public readonly string[] args;
+        public del_Pred? myCallback { get; private set; }
+        public Leaf(string funcName, string[] args)
         {
-            0 => new Stub(),
-            1 => branches[0],
-            _ => throw new InvalidOperationException("Can't abstract away group!"),
-        };
-        void FinalizeWord()
+            this.funcName = funcName;
+            this.args = args;
+            myCallback = null;
+        }
+        public bool Eval() => myCallback?.Invoke() ?? true;
+        public void Populate(del_FetchPred exchanger) => myCallback = exchanger(funcName, args);
+        public override string ToString()
         {
-            branches.Add(MakeLeaf(tokens, in prevWordIndex));
-            cWord = null;
-            litStack.Clear();
+            return funcName + "(" + (args.Length == 0 ? string.Empty : args.Aggregate((x, y) => $"{x}, {y}")) + ")";
         }
     }
+    /// <summary>
+    /// A compile time node. should always be stripped when finishing parse.
+    /// </summary>
+    [System.Diagnostics.DebuggerDisplay("{ToString()}")]
+    public struct Group : IExpr
+    {
+        public IExpr[] members;
+        public bool Eval()
+        {
+            throw new InvalidOperationException("Groups should not exist!");
+        }
+        public void Populate(del_FetchPred exchanger)
+        {
+            throw new InvalidOperationException("Groups should not exist!");
+        }
+        public string ToString(string format, IFormatProvider formatProvider)
+        {
+            return "{" + ((members?.Length ?? 0) == 0 ? String.Empty : members.Select(x => x.ToString()).Aggregate((x, y) => $"{x}, {y}")) + "}";
+        }
+    }
+    /// <summary>
+    /// An operator. Can have one or two operands (if one, it's always on the right).
+    /// </summary>
+    [System.Diagnostics.DebuggerDisplay("{ToString()}")]
+    public struct Oper : IExpr
+    {
+        /// <summary>
+        /// operation type
+        /// </summary>
+        public Op TP;
+        /// <summary>
+        /// Left operand
+        /// </summary>
+        public IExpr? L;
+        /// <summary>
+        /// right operand
+        /// </summary>
+        public IExpr R;
+        public Oper(Op tP)
+        {
+            TP = tP;
+            L = null;
+            R = null;
+        }
+        public bool Eval()
+            => TP switch
+            {
+                Op.AND => (L?.Eval() ?? true) && (R?.Eval() ?? true),
+                Op.OR => (L?.Eval() ?? true) || (R?.Eval() ?? true),
+                Op.XOR => (L?.Eval() ?? true) ^ (R?.Eval() ?? true),
+                Op.NOT => ! (R?.Eval() ?? true),
+                _ => throw new ArgumentException("Invalid operator"),
+            };
+        public void Populate(del_FetchPred exchanger)
+        {
+            L?.Populate(exchanger);
+            R.Populate(exchanger);
+        }
 
-    private static List<Token> Tokenize(string expression)
+        public override string ToString()
+        {
+            return $"[ {L} {TP} {R} ]";
+        }
+    }
+    /// <summary>
+    /// A parsing token. Carries type and value.
+    /// </summary>
+    [System.Diagnostics.DebuggerDisplay("{type}:\"{val}\"")]
+    public struct Token
+    {
+        public TokenType type;
+        public string val;
+
+        public Token(TokenType type, string val)
+        {
+            this.type = type;
+            this.val = val;
+        }
+    }
+    /// <summary>
+    /// Operation type.
+    /// </summary>
+    public enum Op
+    {
+        NOT,
+        AND,
+        XOR,
+        OR,
+    }
+    /// <summary>
+    /// Token type. Order of enum items determines recognition precedence.
+    /// </summary>
+    public enum TokenType
+    {
+        DelimOpen,
+        DelimClose,
+        Separator,
+        Operator,
+        Literal,
+        Word,
+        //Discard
+    }
+    /// <summary>
+    /// Eval invocation delegates.
+    /// </summary>
+    /// <returns></returns>
+    public delegate bool del_Pred();
+    /// <summary>
+    /// Eval invocation delegates retrieval delegates. =
+    /// </summary>
+    /// <param name="name">Function name.</param>
+    /// <param name="args">Arguments.</param>
+    /// <returns>Delegate for selected word. Returning null is allowed.</returns>
+    public delegate del_Pred del_FetchPred(string name, params string[] args);
+    #endregion
+    #region statics
+    /// <summary>
+    /// Tokenizes a string.
+    /// </summary>
+    /// <param name="expression"></param>
+    /// <returns>An array of tokens.</returns>
+    /// <exception cref="ArgumentException">There were unrecognized patterns in the expression.</exception>
+    private List<Token> Tokenize(string expression)
     {
         List<Token> tokens = new();
         string remaining = expression.Clone() as string;
@@ -134,179 +250,131 @@ public sealed class PredicateInlay
                     results.Add(new(val, match));
                 }
             }
-
-            KeyValuePair<TokenType, Match>? sel = null;
+            //scroll through all acquired results, take the closest one with higher precedence.
+            KeyValuePair<TokenType, Match>? selectedKvp = null;
             for (int i = 0; i < results.Count; i++) {
                 KeyValuePair<TokenType, Match> kvp = results[i]; 
-                if (kvp.Value.Index == closest) { sel = kvp; break; }
+                if (kvp.Value.Index == closest) { selectedKvp = kvp; break; }
             }
-            //no tokens recognzed, abort
+            //Unrecognized pattern, abort.
             //todo: maybe just break?
-            if (sel == null)
+            if (selectedKvp == null)
                 throw new ArgumentException($"encountered a parsing error (remaining: {remaining})");
             //cut the remaining string, add gathered token if not a separator.
-            var tt = sel.Value.Key;
-            var selMatch = sel.Value.Value;
-            remaining = remaining.Substring(selMatch.Index + selMatch.Length);
-            if (sel.Value.Key != TokenType.Separator)
+            var tokType = selectedKvp.Value.Key;
+            var selectedMatch = selectedKvp.Value.Value; //fuck these things get ugly
+            remaining = remaining.Substring(selectedMatch.Index + selectedMatch.Length);
+            if (selectedKvp.Value.Key != TokenType.Separator)
             {
-                tokens.Add(new Token(tt, selMatch.Value));
+                tokens.Add(new Token(tokType, selectedMatch.Value));
             }
         }
         return tokens;
     }
-
-    #region nested
-    
-    public class Tree
+    /// <summary>
+    /// Recursive descent parsing.
+    /// </summary>
+    /// <param name="tokens">An array of tokens to work over.</param>
+    /// <param name="index">A reference to current index. Obviously, top layer should start at zero.</param>
+    /// <returns>The resulting <see cref="IExpr"/>.</returns>
+    /// <exception cref="InvalidOperationException">Failed to strip a group.</exception>
+    private static IExpr Parse(Token[] tokens, ref int index)
     {
-        public readonly IExpr root;
-        public Tree(IExpr root)
+        if (tokens.Length == 0) return new Stub();
+        List<string> litStack = new();
+        int prevWordIndex = index; //index of a last word, used for finalizing words
+        string? cWord = null; //current word's name
+        List<IExpr> branches = new();
+        for (; index < tokens.Length; index++)
         {
-            this.root = root;
-        }
-        public void Populate(del_FetchPred exchanger)
-        {
-            root.Populate(exchanger);
-        }
-        public bool Eval() => root.Eval();
-    }
-
-    public interface IExpr : IFormattable
-    {
-        public bool Eval();
-        public void Populate(del_FetchPred exchanger);
-    }
-    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
-    public struct Stub : IExpr
-    {
-        public bool Eval()
-            => true;
-
-        public void Populate(del_FetchPred exchanger) { }
-
-        public string ToString(string format, IFormatProvider formatProvider)
-            => "{}";
-    }
-    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
-    public struct Leaf : IExpr
-    {
-        public readonly string funcName;
-        public readonly string[] args;
-        public del_Pred? myPredicate { get; private set; }
-        public Leaf(string funcName, string[] args)
-        {
-            this.funcName = funcName;
-            this.args = args;
-            myPredicate = null;
-        }
-
-        //public Leaf(string name, string[] args){
-        public bool Eval()
-            => myPredicate?.Invoke() ?? true;
-
-        public void Populate(del_FetchPred exchanger)
-        {
-            myPredicate = exchanger(funcName, args);
-        }
-
-        public string ToString(string format, IFormatProvider formatProvider)
-        {
-            return "Leaf " + funcName + "(" + (args.Length == 0 ? String.Empty : args.Aggregate((x, y) => $"{x}, {y}")) + ")";
-        }
-    }
-    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
-    public struct Group : IExpr
-    {
-        public IExpr[] members;
-        public bool Eval()
-        {
-            throw new InvalidOperationException("Groups should not exist!");
-        }
-
-        public void Populate(del_FetchPred exchanger)
-        {
-            throw new InvalidOperationException("Groups should not exist!");
-        }
-        public string ToString(string format, IFormatProvider formatProvider)
-        {
-            return "{" + (members.Length == 0 ? String.Empty : members.Select(x => x.ToString(null, null)).Aggregate((x, y) => $"{x}, {y}")) + "}";
-        }
-    }
-    [System.Diagnostics.DebuggerDisplay("{ToString(null, null)}")]
-    public struct Oper : IExpr
-    {
-        public Op TP;
-        public IExpr L;
-        public IExpr R;
-        //public IExpr C;
-
-        public Oper(Op tP)
-        {
-            TP = tP;
-            L = null;
-            R = null;
-            //C = null;
-        }
-
-        //public readonly 
-        public bool Eval()
-            => TP switch
+            //see what current token is
+            ref var cTok = ref tokens[index];
+            if (cTok.type is not TokenType.Literal && cWord is not null)
             {
-                Op.AND => (L?.Eval() ?? true) && (R?.Eval() ?? true),
-                Op.OR => (L?.Eval() ?? true) || (R?.Eval() ?? true),
-                Op.XOR => (L?.Eval() ?? true) ^ (R?.Eval() ?? true),
-                Op.NOT => ! (R?.Eval() ?? true),
-                _ => throw new ArgumentException("Invalid operator"),
-            };
+                FinalizeWord(); //a word's arguments have ended.
+            }
 
-        public void Populate(del_FetchPred exchanger)
+            switch (cTok.type)
+            {
+                //if it's a delim, recurse into an embedded group
+                case TokenType.DelimOpen:
+                    index += 1;
+                    branches.Add(Parse(tokens, ref index)); //descend
+                    break;
+                case TokenType.DelimClose:
+                    if (cWord is not null) FinalizeWord();
+                    goto finish; // round up
+                    //if it's an operator, push an operator
+                case TokenType.Operator:
+                    branches.Add(new Oper(GetOp(in cTok)));
+                    break;
+                    //begin recording a new word
+                case TokenType.Word:
+                    prevWordIndex = index;
+                    cWord = cTok.val;
+                    break;
+                default:
+                    break;
+            }
+        }
+    finish:
+        if (cWord is not null) FinalizeWord(); //just to be sure
+        //operators start consuming
+        foreach (Op tp in new[] { Op.NOT, Op.AND, Op.XOR, Op.OR })
         {
-            L?.Populate(exchanger);
-            R.Populate(exchanger);
+            //looping right to left.
+            for (int i = branches.Count - 1; i >= 0; i--)
+            {
+                IExpr cBranch = branches[i];
+                if (cBranch is Oper o && o.TP == tp && o.L is null && o.R is null)
+                {
+                    if (i < 0 || i >= branches.Count) continue;
+                    if (o.TP is not Op.NOT)
+                    {
+                        //remove both
+                        o.R = branches[i + 1];  
+                        o.L = branches[i - 1];
+                        branches[i] = o;
+                        branches.RemoveAt(i + 1);
+                        branches.RemoveAt(i - 1);
+#warning hope this was right
+                        i--;
+                    }
+                    else
+                    {
+                        //only on the right
+                        o.R = branches[i + 1];
+                        branches[i] = o;
+                        branches.RemoveAt(i + 1);
+                    }
+                }
+            }
         }
 
-        public string ToString(string format, IFormatProvider formatProvider)
+        //for (int i = branches.Count - 1; i >= 0; i--)
+        //{
+        //    IExpr cBranch = branches[i];
+        //    if (cBranch is Oper o && o.L == null) { branches[i] = o.R; }
+        //}
+        return branches.Count switch
         {
-            return $"[{L} {this.TP} {R}]";
+            0 => new Stub(), // empty group
+            1 => branches[0], // normal
+            _ => throw new InvalidOperationException("Can't abstract away group!"), //failed to strip
+        };
+        void FinalizeWord()
+        {
+            branches.Add(MakeLeaf(tokens, in prevWordIndex));
+            cWord = null;
+            litStack.Clear();
         }
     }
-
-    [System.Diagnostics.DebuggerDisplay("{type}:\"{val}\"")]
-    public struct Token
-    {
-        public TokenType type;
-        public string val;
-
-        public Token(TokenType type, string val)
-        {
-            this.type = type;
-            this.val = val;
-        }
-    }
-
-    public enum Op
-    {
-        AND,
-        OR,
-        XOR,
-        NOT
-    }
-    public enum TokenType
-    {
-        DelimOpen,
-        DelimClose,
-        Separator,
-        Operator,
-        Literal,
-        Word,
-        //Discard
-    }
-
-    public delegate bool del_Pred();
-    public delegate del_Pred del_FetchPred(string name, params string[] args);
-    #endregion
-    #region statics
+    /// <summary>
+    /// Attempts to create a leaf node from a selected token, using all subsequent literals as args.
+    /// </summary>
+    /// <param name="tokens">Token array.</param>
+    /// <param name="index">Token index.</param>
+    /// <returns>Resulting leaf node, null if failure</returns>
     public static Leaf? MakeLeaf(Token[] tokens, in int index)
     {
         if (index < 0 || index >= tokens.Length) return null;
@@ -322,9 +390,15 @@ public sealed class PredicateInlay
         }
         return new Leaf(tok.val, args.ToArray());
     }
-    public static Op GetOp(in Token t)
+    /// <summary>
+    /// Gets an operator type from token 
+    /// </summary>
+    /// <param name="t">Token to check</param>
+    /// <returns>Resulting operation type, null if token was not an operator token.</returns>
+    /// <exception cref="ArgumentException"></exception>
+    public static Op? GetOp(in Token t)
     {
-        if (t.type != TokenType.Operator) throw new ArgumentException("Incorrect token type!");
+        if (t.type != TokenType.Operator) return null;
         return t.val.ToLower() switch
         {
             "|" or "or" => Op.OR,
@@ -334,6 +408,12 @@ public sealed class PredicateInlay
             _ => throw new ArgumentException("Invalid token payload")
         };
     }
+    /// <summary>
+    /// Returns a recognition regex object for a given token type.
+    /// </summary>
+    /// <param name="tt"></param>
+    /// <returns></returns>
+    /// <exception cref="IndexOutOfRangeException"></exception>
     private static Regex RegexForTT(TokenType tt)
         => tt switch
         {
@@ -347,6 +427,9 @@ public sealed class PredicateInlay
             //TokenType.Discard => throw new NotImplementedException(),
             _ => throw new IndexOutOfRangeException("Supplied invalid token type"),
         };
+    /// <summary>
+    /// precached token rec regexes
+    /// </summary>
     private readonly static Dictionary<TokenType, Regex> exes;
     static PredicateInlay()
     {

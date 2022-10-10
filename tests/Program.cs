@@ -37,7 +37,7 @@ internal class Program
 
             Console.WriteLine($"{teststring}\n- - - -\n");
             PredicateInlay test = new(teststring, exchanger);
-            Console.WriteLine( test.ltree.Eval());
+            Console.WriteLine( test.TheTree.Eval());
             Console.WriteLine("\n- - - -\n");
         }
     }
