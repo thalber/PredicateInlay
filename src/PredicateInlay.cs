@@ -3,19 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+
+using System.Reflection.Emit;
 /// <summary>
 /// Parses a string by logical expression operators (symbolic as well as words and/or/xor/not) into a treelike structure, then, using a supplied <see cref="del_FetchPred"/>, exchanges resulting substrings between logical operators into delegates, then evaluates expression on demand.
 /// </summary>
 public sealed partial class PredicateInlay
 {
-    //todo: massive amounts of cleanup
-    //todo: comments
     //todo: compiling to a dynamic method?
     #region fields
     /// <summary>
     /// Contains the Inlay's logic tree
     /// </summary>
     private readonly Tree TheTree;
+    private Guid myID = Guid.NewGuid();
+    private DynamicMethod? compiledEvalDynM;
+    private del_Pred? compiledEval;
     #endregion
     public PredicateInlay(string expression, del_FetchPred exchanger)
     {
@@ -29,17 +32,197 @@ public sealed partial class PredicateInlay
         //water it
         TheTree.Populate(exchanger);
     }
+    #region user methods
+    public void Populate(del_FetchPred newExchanger) { 
+        TheTree.Populate(newExchanger);
+        compiledEvalDynM = null;
+        compiledEval = null;
+    }
+    public void Compile()
+    {
+        if (TheTree is null) return;
+        if (!TheTree.Populated) return;
+        DynamicMethod dyn = new(
+            $"PredInlay-{myID}-DynEval",
+            typeof(bool),
+            new Type[0],
+            typeof(PredicateInlay),
+            false);
+        var il = dyn.GetILGenerator();
+        EmitToDyn(ref il, in TheTree.root);
+    }
+    public bool Eval() => compiledEval?.Invoke() ?? TheTree.Eval();
+    #endregion
+    #region internals
+    private void EmitToDyn(ref ILGenerator il, in IExpr ex)
+    {
+        throw new NotImplementedException();
+    }
+    /// <summary>
+    /// Tokenizes a string.
+    /// </summary>
+    /// <param name="expression"></param>
+    /// <returns>An array of tokens.</returns>
+    /// <exception cref="ArgumentException">There were unrecognized patterns in the expression.</exception>
+    private List<Token> Tokenize(string expression)
+    {
+        List<Token> tokens = new();
+        string remaining = expression.Clone() as string;
+        List<KeyValuePair<TokenType, Match>> results = new();
+        while (remaining.Length > 0)
+        {
+            results.Clear();
+            //closest match is considered the correct one.
+            int closest = int.MaxValue;
+            //token recognition precedence set by enum order.
+            foreach (TokenType val in Enum.GetValues(typeof(TokenType)))
+            {
+                var matcher = exes[val];
+                var match = matcher.Match(remaining);
+                if (match.Success)
+                {
+                    //something found.
+                    if (match.Index < closest) closest = match.Index;
+                    results.Add(new(val, match));
+                }
+            }
+            //scroll through all acquired results, take the closest one with higher precedence.
+            KeyValuePair<TokenType, Match>? selectedKvp = null;
+            for (int i = 0; i < results.Count; i++) {
+                KeyValuePair<TokenType, Match> kvp = results[i]; 
+                if (kvp.Value.Index == closest) { selectedKvp = kvp; break; }
+            }
+            //Unrecognized pattern, abort.
+            //todo: maybe just break?
+            if (selectedKvp == null)
+                throw new ArgumentException($"encountered a parsing error (remaining: {remaining})");
+            //cut the remaining string, add gathered token if not a separator.
+            var tokType = selectedKvp.Value.Key;
+            var selectedMatch = selectedKvp.Value.Value; //fuck these things get ugly
+            remaining = remaining.Substring(selectedMatch.Index + selectedMatch.Length);
+            if (selectedKvp.Value.Key != TokenType.Separator)
+            {
+                tokens.Add(new Token(tokType, selectedMatch.Value));
+            }
+        }
+        return tokens;
+    }
+    /// <summary>
+    /// Recursive descent parsing.
+    /// </summary>
+    /// <param name="tokens">An array of tokens to work over.</param>
+    /// <param name="index">A reference to current index. Obviously, top layer should start at zero.</param>
+    /// <returns>The resulting <see cref="IExpr"/>.</returns>
+    /// <exception cref="InvalidOperationException">Failed to strip a group.</exception>
+    private IExpr Parse(Token[] tokens, ref int index)
+    {
+        if (tokens.Length == 0) return new Stub();
+        List<string> litStack = new();
+        int prevWordIndex = index; //index of a last word, used for finalizing words
+        string? cWord = null; //current word's name
+        List<IExpr> branches = new();
+        for (; index < tokens.Length; index++)
+        {
+            //see what current token is
+            ref var cTok = ref tokens[index];
+            if (cTok.type is not TokenType.Literal && cWord is not null)
+            {
+                FinalizeWord(); //a word's arguments have ended.
+            }
+
+            switch (cTok.type)
+            {
+                //if it's a delim, recurse into an embedded group
+                case TokenType.DelimOpen:
+                    index += 1;
+                    branches.Add(Parse(tokens, ref index)); //descend
+                    break;
+                case TokenType.DelimClose:
+                    if (cWord is not null) FinalizeWord();
+                    goto finish; // round up
+                    //if it's an operator, push an operator
+                case TokenType.Operator:
+                    branches.Add(new Oper(GetOp(in cTok).Value));
+                    break;
+                    //begin recording a new word
+                case TokenType.Word:
+                    prevWordIndex = index;
+                    cWord = cTok.val;
+                    break;
+                default:
+                    break;
+            }
+        }
+    finish:
+        if (cWord is not null) FinalizeWord(); //just to be sure
+        //operators start consuming
+        foreach (Op tp in new[] { Op.NOT, Op.AND, Op.XOR, Op.OR })
+        {
+            //looping right to left.
+            for (int i = branches.Count - 1; i >= 0; i--)
+            {
+                IExpr cBranch = branches[i];
+                if (cBranch is Oper o && o.TP == tp && o.L is null && o.R is null)
+                {
+                    if (i < 0 || i >= branches.Count) continue;
+                    if (o.TP is not Op.NOT)
+                    {
+                        //remove both
+                        o.R = branches[i + 1];  
+                        o.L = branches[i - 1];
+                        branches[i] = o;
+                        branches.RemoveAt(i + 1);
+                        branches.RemoveAt(i - 1);
+#warning hope this was right
+                        i--;
+                    }
+                    else
+                    {
+                        //only on the right
+                        o.R = branches[i + 1];
+                        branches[i] = o;
+                        branches.RemoveAt(i + 1);
+                    }
+                }
+            }
+        }
+
+        //for (int i = branches.Count - 1; i >= 0; i--)
+        //{
+        //    IExpr cBranch = branches[i];
+        //    if (cBranch is Oper o && o.L == null) { branches[i] = o.R; }
+        //}
+        return branches.Count switch
+        {
+            0 => new Stub(), // empty group
+            1 => branches[0], // normal
+            _ => throw new InvalidOperationException("Can't abstract away group!"), //failed to strip
+        };
+        void FinalizeWord()
+        {
+            branches.Add(MakeLeaf(tokens, in prevWordIndex));
+            cWord = null;
+            litStack.Clear();
+        }
+    }
+    /// <summary>
+    /// Attempts to create a leaf node from a selected token, using all subsequent literals as args.
+    /// </summary>
+    /// <param name="tokens">Token array.</param>
+    /// <param name="index">Token index.</param>
+    /// <returns>Resulting leaf node, null if failure</returns>
+    #endregion
     #region nested
     /// <summary>
     /// Wraps compiled expression structure
     /// </summary>
     public class Tree
     {
+        public bool Populated { get; private set; }
         /// <summary>
         /// root node
         /// </summary>
         public readonly IExpr root;
-
         public Tree(IExpr root)
         {
             this.root = root;
@@ -50,6 +233,7 @@ public sealed partial class PredicateInlay
         /// <param name="exchanger"></param>
         public void Populate(del_FetchPred exchanger)
         {
+            Populated = true;
             root.Populate(exchanger);
         }
         /// <summary>
@@ -222,159 +406,6 @@ public sealed partial class PredicateInlay
     public delegate del_Pred del_FetchPred(string name, params string[] args);
     #endregion
     #region statics
-    /// <summary>
-    /// Tokenizes a string.
-    /// </summary>
-    /// <param name="expression"></param>
-    /// <returns>An array of tokens.</returns>
-    /// <exception cref="ArgumentException">There were unrecognized patterns in the expression.</exception>
-    private List<Token> Tokenize(string expression)
-    {
-        List<Token> tokens = new();
-        string remaining = expression.Clone() as string;
-        List<KeyValuePair<TokenType, Match>> results = new();
-        while (remaining.Length > 0)
-        {
-            results.Clear();
-            //closest match is considered the correct one.
-            int closest = int.MaxValue;
-            //token recognition precedence set by enum order.
-            foreach (TokenType val in Enum.GetValues(typeof(TokenType)))
-            {
-                var matcher = exes[val];
-                var match = matcher.Match(remaining);
-                if (match.Success)
-                {
-                    //something found.
-                    if (match.Index < closest) closest = match.Index;
-                    results.Add(new(val, match));
-                }
-            }
-            //scroll through all acquired results, take the closest one with higher precedence.
-            KeyValuePair<TokenType, Match>? selectedKvp = null;
-            for (int i = 0; i < results.Count; i++) {
-                KeyValuePair<TokenType, Match> kvp = results[i]; 
-                if (kvp.Value.Index == closest) { selectedKvp = kvp; break; }
-            }
-            //Unrecognized pattern, abort.
-            //todo: maybe just break?
-            if (selectedKvp == null)
-                throw new ArgumentException($"encountered a parsing error (remaining: {remaining})");
-            //cut the remaining string, add gathered token if not a separator.
-            var tokType = selectedKvp.Value.Key;
-            var selectedMatch = selectedKvp.Value.Value; //fuck these things get ugly
-            remaining = remaining.Substring(selectedMatch.Index + selectedMatch.Length);
-            if (selectedKvp.Value.Key != TokenType.Separator)
-            {
-                tokens.Add(new Token(tokType, selectedMatch.Value));
-            }
-        }
-        return tokens;
-    }
-    /// <summary>
-    /// Recursive descent parsing.
-    /// </summary>
-    /// <param name="tokens">An array of tokens to work over.</param>
-    /// <param name="index">A reference to current index. Obviously, top layer should start at zero.</param>
-    /// <returns>The resulting <see cref="IExpr"/>.</returns>
-    /// <exception cref="InvalidOperationException">Failed to strip a group.</exception>
-    private static IExpr Parse(Token[] tokens, ref int index)
-    {
-        if (tokens.Length == 0) return new Stub();
-        List<string> litStack = new();
-        int prevWordIndex = index; //index of a last word, used for finalizing words
-        string? cWord = null; //current word's name
-        List<IExpr> branches = new();
-        for (; index < tokens.Length; index++)
-        {
-            //see what current token is
-            ref var cTok = ref tokens[index];
-            if (cTok.type is not TokenType.Literal && cWord is not null)
-            {
-                FinalizeWord(); //a word's arguments have ended.
-            }
-
-            switch (cTok.type)
-            {
-                //if it's a delim, recurse into an embedded group
-                case TokenType.DelimOpen:
-                    index += 1;
-                    branches.Add(Parse(tokens, ref index)); //descend
-                    break;
-                case TokenType.DelimClose:
-                    if (cWord is not null) FinalizeWord();
-                    goto finish; // round up
-                    //if it's an operator, push an operator
-                case TokenType.Operator:
-                    branches.Add(new Oper(GetOp(in cTok).Value));
-                    break;
-                    //begin recording a new word
-                case TokenType.Word:
-                    prevWordIndex = index;
-                    cWord = cTok.val;
-                    break;
-                default:
-                    break;
-            }
-        }
-    finish:
-        if (cWord is not null) FinalizeWord(); //just to be sure
-        //operators start consuming
-        foreach (Op tp in new[] { Op.NOT, Op.AND, Op.XOR, Op.OR })
-        {
-            //looping right to left.
-            for (int i = branches.Count - 1; i >= 0; i--)
-            {
-                IExpr cBranch = branches[i];
-                if (cBranch is Oper o && o.TP == tp && o.L is null && o.R is null)
-                {
-                    if (i < 0 || i >= branches.Count) continue;
-                    if (o.TP is not Op.NOT)
-                    {
-                        //remove both
-                        o.R = branches[i + 1];  
-                        o.L = branches[i - 1];
-                        branches[i] = o;
-                        branches.RemoveAt(i + 1);
-                        branches.RemoveAt(i - 1);
-#warning hope this was right
-                        i--;
-                    }
-                    else
-                    {
-                        //only on the right
-                        o.R = branches[i + 1];
-                        branches[i] = o;
-                        branches.RemoveAt(i + 1);
-                    }
-                }
-            }
-        }
-
-        //for (int i = branches.Count - 1; i >= 0; i--)
-        //{
-        //    IExpr cBranch = branches[i];
-        //    if (cBranch is Oper o && o.L == null) { branches[i] = o.R; }
-        //}
-        return branches.Count switch
-        {
-            0 => new Stub(), // empty group
-            1 => branches[0], // normal
-            _ => throw new InvalidOperationException("Can't abstract away group!"), //failed to strip
-        };
-        void FinalizeWord()
-        {
-            branches.Add(MakeLeaf(tokens, in prevWordIndex));
-            cWord = null;
-            litStack.Clear();
-        }
-    }
-    /// <summary>
-    /// Attempts to create a leaf node from a selected token, using all subsequent literals as args.
-    /// </summary>
-    /// <param name="tokens">Token array.</param>
-    /// <param name="index">Token index.</param>
-    /// <returns>Resulting leaf node, null if failure</returns>
     public static Leaf? MakeLeaf(Token[] tokens, in int index)
     {
         if (index < 0 || index >= tokens.Length) return null;
