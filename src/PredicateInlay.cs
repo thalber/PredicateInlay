@@ -55,7 +55,7 @@ public sealed class PredicateInlay
                     goto finish;
                 //if it's an operator, push an operator
                 case TokenType.Operator:
-                    branches.Add(new Oper(GetOp(in cTok), null, null));
+                    branches.Add(new Oper(GetOp(in cTok)));
                     break;
                 case TokenType.Word:
                     prevWordIndex = index;
@@ -68,7 +68,7 @@ public sealed class PredicateInlay
     finish:
         if (cWord is not null) FinalizeWord();
 
-        foreach (Op tp in new[] { Op.AND, Op.XOR, Op.OR })
+        foreach (Op tp in new[] { Op.NOT, Op.AND, Op.XOR, Op.OR })
         {
             for (int i = branches.Count - 1; i >= 0; i--)
             {
@@ -76,11 +76,21 @@ public sealed class PredicateInlay
                 if (cBranch is Oper o && o.TP == tp && o.L is null && o.R is null)
                 {
                     if (i < 0 || i >= branches.Count) continue;
-                    o.R = branches[i + 1];
-                    o.L = branches[i - 1];
-                    branches[i] = o;
-                    branches.RemoveAt(i + 1);
-                    branches.RemoveAt(i - 1);
+                    if (o.TP is not Op.NOT)
+                    {
+                        o.R = branches[i + 1];  
+                        o.L = branches[i - 1];
+                        branches[i] = o;
+                        branches.RemoveAt(i + 1);
+                        branches.RemoveAt(i - 1);
+                    }
+                    else
+                    {
+                        o.R = branches[i + 1];
+                        branches[i] = o;
+                        branches.RemoveAt(i + 1);
+                    }
+                    
                     i--;
                 }
             }
@@ -229,28 +239,30 @@ public sealed class PredicateInlay
         public Op TP;
         public IExpr L;
         public IExpr R;
+        //public IExpr C;
 
-        public Oper(Op tP, IExpr l, IExpr r)
+        public Oper(Op tP)
         {
             TP = tP;
-            L = l;
-            R = r;
+            L = null;
+            R = null;
+            //C = null;
         }
 
         //public readonly 
         public bool Eval()
             => TP switch
             {
-                Op.AND => L.Eval() && R.Eval(),
-                Op.OR => L.Eval() || R.Eval(),
-                Op.XOR => L.Eval() ^ R.Eval(),
-                //Op.NOT => throw new NotImplementedException(),
+                Op.AND => (L?.Eval() ?? true) && (R?.Eval() ?? true),
+                Op.OR => (L?.Eval() ?? true) || (R?.Eval() ?? true),
+                Op.XOR => (L?.Eval() ?? true) ^ (R?.Eval() ?? true),
+                Op.NOT => ! (R?.Eval() ?? true),
                 _ => throw new ArgumentException("Invalid operator"),
             };
 
         public void Populate(del_FetchPred exchanger)
         {
-            L.Populate(exchanger);
+            L?.Populate(exchanger);
             R.Populate(exchanger);
         }
 
@@ -278,7 +290,7 @@ public sealed class PredicateInlay
         AND,
         OR,
         XOR,
-        //NOT
+        NOT
     }
     public enum TokenType
     {
@@ -318,7 +330,7 @@ public sealed class PredicateInlay
             "|" or "or" => Op.OR,
             "&" or "and" => Op.AND,
             "^" or "xor" or "!=" => Op.XOR,
-            "!" or "not" => throw new ArgumentException("Invert operator currently not supported"),
+            "!" or "not" => Op.NOT,
             _ => throw new ArgumentException("Invalid token payload")
         };
     }

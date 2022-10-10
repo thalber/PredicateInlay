@@ -8,24 +8,27 @@ internal class Program
     {
         string[] teststrings = new[] {
             //"a or b and c 12 13 15 -16 'aegew2' -17.2",
-            "(a or b) and c",
+            "(a xor not b) and c",
             "(a) and (b) xor (c | d)",
             "(a or b xor c -800) & d ^ e | (f -0.15 0.17 and g 'thing')",
         };
 
         PredicateInlay.del_FetchPred exchanger = (name, args) =>
         {
-            return name switch
-            {
-                "a" => () => true,
-                "b" => () => false,
-                "c" => () => true,
-                "d" => () => false,
-                "e" => () => true,
-                "f" => () => false,
-                "g" => () => true,
-                "h" => () => false,
-                _ => () => true
+            return () => {
+                return name switch
+                {
+                    "a" => true,
+                    "b" => false,
+                    "c" => true,
+                    "d" => false,
+                    "e" => true,
+                    "f" => false,
+                    "g" => true,
+                    "h" => false,
+                    _ => true
+                };
+                //''return true;
             };
         };
 
