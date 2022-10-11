@@ -6,7 +6,7 @@ This item is meant to be used as a pastein singlefile snippet.
 
 Drop into your project as a source file.
 
-Feed the pattern string when instantiating. `exchanger` is once for every node in the resulting logic structure. for every "word", exchanger receives a string with word name and zero or more arguments from consequent literals. It should return the `() => bool` type callback.
+Feed the pattern string when instantiating. `exchanger` is once for every node in the resulting logic structure. for every "word", exchanger receives a string with word name and zero or more arguments from consequent literals. It returns the `() => bool` type callback or null.
 
 ## Requirements
 
