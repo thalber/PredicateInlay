@@ -56,6 +56,7 @@ public sealed partial class PredicateInlay
     #region internals
     private void EmitToDyn(ref ILGenerator il, in IExpr ex)
     {
+        //todo: remove or finish
         throw new NotImplementedException();
     }
     /// <summary>
@@ -63,7 +64,6 @@ public sealed partial class PredicateInlay
     /// </summary>
     /// <param name="expression"></param>
     /// <returns>An array of tokens.</returns>
-    /// <exception cref="ArgumentException">There were unrecognized patterns in the expression.</exception>
     private List<Token> Tokenize(string expression)
     {
         List<Token> tokens = new();
@@ -92,10 +92,9 @@ public sealed partial class PredicateInlay
                 KeyValuePair<TokenType, Match> kvp = results[i]; 
                 if (kvp.Value.Index == closest) { selectedKvp = kvp; break; }
             }
-            //Unrecognized pattern, abort.
-            //todo: maybe just break?
+            //no recognizable patterns left, abort.
             if (selectedKvp == null)
-                throw new ArgumentException($"encountered a parsing error (remaining: {remaining})");
+                break;
             //cut the remaining string, add gathered token if not a separator.
             var tokType = selectedKvp.Value.Key;
             var selectedMatch = selectedKvp.Value.Value; //fuck these things get ugly

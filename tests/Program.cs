@@ -7,10 +7,15 @@ internal class Program
     static void Main(string[] args)
     {
         string[] teststrings = new[] {
-            //"a or b and c 12 13 15 -16 'aegew2' -17.2",
+            "not (a))))))))",
+            "(((((a)",
+            "() xor a",
+            "a -0.4 15 or b 'ploo'",
+            "a & b xor c and ! (d or not e)",
             "(a xor not b) and c",
             "(a) and (b) xor (c | d)",
             "(a or b xor c -800) & d ^ e | (f -0.15 0.17 and g 'thing')",
+            //"18 a and b and c and 2", //this is invalid
         };
 
         PredicateInlay.del_FetchPred exchanger = (name, args) =>
@@ -35,9 +40,9 @@ internal class Program
         foreach (string teststring in teststrings)
         {
 
-            Console.WriteLine($"{teststring}\n- - - -\n");
+            Console.WriteLine($"{teststring}");
             PredicateInlay test = new(teststring, exchanger);
-            Console.WriteLine( test.Eval());
+            Console.WriteLine(test.Eval());
             Console.WriteLine("\n- - - -\n");
         }
     }
