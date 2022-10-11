@@ -172,7 +172,6 @@ public sealed partial class PredicateInlay
                         branches[i] = o;
                         branches.RemoveAt(i + 1);
                         branches.RemoveAt(i - 1);
-#warning hope this was right
                         i--;
                     }
                     else
