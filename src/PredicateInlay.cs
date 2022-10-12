@@ -453,7 +453,7 @@ public sealed partial class PredicateInlay
             TokenType.DelimClose    => new Regex("[)\\]}]", compiled),
             TokenType.Separator     => new Regex("[\\s,]+", compiled),
             TokenType.Operator      => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", compiled),
-            TokenType.Literal       => new Regex("-?\\d+(\\.\\d+)?|(?<=')[\\w\\s]+(?=')", compiled),
+            TokenType.Literal       => new Regex("-?\\d+(\\.\\d+)?|(?<=').*(?=')", compiled),
             TokenType.Word          => new Regex("[a-zA-Z_]+", compiled),
             //TokenType.Discard => throw new NotImplementedException(),
             _ => throw new IndexOutOfRangeException("Supplied invalid token type"),
