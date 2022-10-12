@@ -444,18 +444,21 @@ public sealed partial class PredicateInlay
     /// <returns></returns>
     /// <exception cref="IndexOutOfRangeException"></exception>
     private static Regex RegexForTT(TokenType tt)
-        => tt switch
+    {
+        const RegexOptions compiled = RegexOptions.Compiled;
+        return tt switch
         {
             //todo: decide on delims usage
-            TokenType.DelimOpen => new Regex("[([{]", RegexOptions.Compiled),
-            TokenType.DelimClose => new Regex("[)\\]}]", RegexOptions.Compiled),
-            TokenType.Separator => new Regex("[_\\s,]+", RegexOptions.Compiled),
-            TokenType.Operator => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", RegexOptions.Compiled),
-            TokenType.Literal => new Regex("-{0,1}\\d+(\\.\\d+){0,1}|(?<=').+(?=')", RegexOptions.Compiled),
-            TokenType.Word => new Regex("[a-zA-Z]+", RegexOptions.Compiled),
+            TokenType.DelimOpen     => new Regex("[([{]", compiled),
+            TokenType.DelimClose    => new Regex("[)\\]}]", compiled),
+            TokenType.Separator     => new Regex("[\\s,]+", compiled),
+            TokenType.Operator      => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", compiled),
+            TokenType.Literal       => new Regex("-?\\d+(\\.\\d+)?|(?<=')[\\w\\s]+(?=')", compiled),
+            TokenType.Word          => new Regex("[a-zA-Z_]+", compiled),
             //TokenType.Discard => throw new NotImplementedException(),
             _ => throw new IndexOutOfRangeException("Supplied invalid token type"),
         };
+    }
     /// <summary>
     /// precached token rec regexes
     /// </summary>
