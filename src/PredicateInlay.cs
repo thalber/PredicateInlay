@@ -438,6 +438,10 @@ public sealed partial class PredicateInlay
         };
     }
     /// <summary>
+    /// Modify regex options
+    /// </summary>
+    public static RegexOptions compiled = RegexOptions.Compiled;
+    /// <summary>
     /// Returns a recognition regex object for a given token type.
     /// </summary>
     /// <param name="tt"></param>
@@ -445,7 +449,6 @@ public sealed partial class PredicateInlay
     /// <exception cref="IndexOutOfRangeException"></exception>
     private static Regex RegexForTT(TokenType tt)
     {
-        const RegexOptions compiled = RegexOptions.Compiled;
         return tt switch
         {
             //todo: decide on delims usage
