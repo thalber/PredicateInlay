@@ -31,7 +31,7 @@ public sealed partial class PredicateInlay
         //plant the tree
         TheTree = new(x);
         //water it
-        TheTree.Populate(exchanger);
+        Populate(exchanger);
     }
     #region user methods
     public void Populate(del_FetchPred newExchanger) {
