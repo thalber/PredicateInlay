@@ -441,7 +441,7 @@ public sealed partial class PredicateInlay
     /// <summary>
     /// Modify regex options
     /// </summary>
-    public static RegexOptions compiled = RegexOptions.Compiled;
+    public static RegexOptions regexops = RegexOptions.None;
     /// <summary>
     /// Returns a recognition regex object for a given token type.
     /// </summary>
@@ -453,12 +453,12 @@ public sealed partial class PredicateInlay
         return tt switch
         {
             //todo: decide on delims usage
-            TokenType.DelimOpen     => new Regex("[([{]", compiled),
-            TokenType.DelimClose    => new Regex("[)\\]}]", compiled),
-            TokenType.Separator     => new Regex("[\\s,]+", compiled),
-            TokenType.Operator      => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", compiled),
-            TokenType.Literal       => new Regex("-?\\d+(\\.\\d+)?|(?<=').*(?=')", compiled),
-            TokenType.Word          => new Regex("[a-zA-Z_]+", compiled),
+            TokenType.DelimOpen     => new Regex("[([{]", regexops),
+            TokenType.DelimClose    => new Regex("[)\\]}]", regexops),
+            TokenType.Separator     => new Regex("[\\s,]+", regexops),
+            TokenType.Operator      => new Regex("!=|[&|^!]|(and|or|xor|not)(?=\\s)", regexops),
+            TokenType.Literal       => new Regex("-?\\d+(\\.\\d+)?|(?<=').*(?=')", regexops),
+            TokenType.Word          => new Regex("[a-zA-Z_]+", regexops),
             //TokenType.Discard => throw new NotImplementedException(),
             _ => throw new IndexOutOfRangeException("Supplied invalid token type"),
         };
