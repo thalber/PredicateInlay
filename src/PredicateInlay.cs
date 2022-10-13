@@ -33,7 +33,8 @@ public sealed partial class PredicateInlay
         TheTree.Populate(exchanger);
     }
     #region user methods
-    public void Populate(del_FetchPred newExchanger) { 
+    public void Populate(del_FetchPred newExchanger) {
+        if (newExchanger is null) return;
         TheTree.Populate(newExchanger);
         compiledEvalDynM = null;
         compiledEval = null;
