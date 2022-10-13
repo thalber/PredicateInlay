@@ -64,7 +64,7 @@ public sealed partial class PredicateInlay
     /// </summary>
     /// <param name="expression"></param>
     /// <returns>An array of tokens.</returns>
-    public List<Token> Tokenize(string expression)
+    public static List<Token> Tokenize(string expression)
     {
         List<Token> tokens = new();
         string remaining = expression.Clone() as string;
