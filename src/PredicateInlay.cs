@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 using System.Reflection.Emit;
+
 #pragma warning disable CS1591
 /// <summary>
 /// Parses a string by logical expression operators (symbolic as well as words and/or/xor/not) into a treelike structure, then, using a supplied <see cref="del_FetchPred"/>, exchanges resulting substrings between logical operators into delegates, then evaluates expression on demand.
