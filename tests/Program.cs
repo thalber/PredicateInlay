@@ -20,7 +20,8 @@ internal class Program
 
         PredicateInlay.del_FetchPred exchanger = (name, args) =>
         {
-            return () => {
+            return () =>
+            {
                 return name switch
                 {
                     "a" => true,
