@@ -15,7 +15,7 @@ internal class Program
             "(a xor not b) and c",
             "(a) and (b) xor (c | d)",
             "(a or b xor c -800) & d ^ e | (f -0.15 0.17 and g 'thing')",
-            //"18 a and b and c and 2", //this is invalid
+            "a 'abcde' or b '-10 -10 -10 -10' or c '10;10;10'"
         };
 
         PredicateInlay.del_FetchPred exchanger = (name, args) =>
@@ -34,7 +34,6 @@ internal class Program
                     "h" => false,
                     _ => true
                 };
-                //''return true;
             };
         };
 
