@@ -9,7 +9,8 @@ using System.Text.RegularExpressions;
 /// </summary>
 public sealed partial class PredicateInlay
 {
-	//todo: compiling to a dynamic method?
+	//compiling to a dynamic method?
+	//no fuck that
 	#region fields
 	/// <summary>
 	/// Contains the Inlay's logic tree
@@ -18,15 +19,22 @@ public sealed partial class PredicateInlay
 	//private Guid myID = Guid.NewGuid();
 	//w
 	//private DynamicMethod? compiledEvalDynM;
-	private del_Pred? compiledEval;
-	#endregion
+	//private del_Pred? compiledEval;
+
+	private Action<object>? logger;
+	private bool? mendOnThrow = true;
+	#endregion fields
 	/// <summary>
 	/// Parses an instance from a given expression.
 	/// </summary>
 	/// <param name="expression">Source string.</param>
 	/// <param name="exchanger">Delegate to exchange leaves into callbacks. May be null.</param>
-	public PredicateInlay(string expression, del_FetchPred? exchanger)
+	/// <param name="logger">Optional callback that receives information from the instance (like a message when something breaks)</param>
+	/// <param name="mendOnThrow">Whether to auto-void leaf callbacks on exceptions. Null to do nothing, non-null to set errored triggers to blanks of specific state (true/false)</param>
+	public PredicateInlay(string expression, del_FetchPred? exchanger, Action<object>? logger = null, bool? mendOnThrow = null)
 	{
+		this.logger = logger;
+		this.mendOnThrow = mendOnThrow;
 		//tokenize
 		Token[] tokens = Tokenize(expression).ToArray();
 		//prepare the soil
@@ -47,7 +55,7 @@ public sealed partial class PredicateInlay
 		if (newExchanger is null) return;
 		TheTree.Populate(newExchanger);
 		//compiledEvalDynM = null;
-		compiledEval = null;
+		//compiledEval = null;
 	}
 	/// <summary>
 	/// Throws <see cref="NotImplementedException"/>.
@@ -63,7 +71,7 @@ public sealed partial class PredicateInlay
 	/// <returns></returns>
 	public bool Eval()
 	{
-		return compiledEval?.Invoke() ?? TheTree.Eval();
+		return TheTree.Eval(logger, mendOnThrow);
 	}
 
 	#endregion
@@ -250,9 +258,9 @@ public sealed partial class PredicateInlay
 		/// Runs evaluation on a tree
 		/// </summary>
 		/// <returns></returns>
-		public bool Eval()
+		public bool Eval(Action<object>? logger, bool? mend)
 		{
-			return root.Eval();
+			return root.Eval(logger, mend);
 		}
 	}
 	/// <summary>
@@ -264,7 +272,7 @@ public sealed partial class PredicateInlay
 		/// Evaluates a node and checks if it's true or false. Ran repeatedly.
 		/// </summary>
 		/// <returns></returns>
-		public bool Eval();
+		public bool Eval(Action<object>? logger, bool? mend);
 		/// <summary>
 		/// Populates a node (and children nodes if any) using a given <see cref="del_FetchPred"/>. Ran once.
 		/// </summary>
@@ -278,7 +286,7 @@ public sealed partial class PredicateInlay
 	public struct Stub : IExpr
 	{
 		/// <inheritdoc/>
-		public bool Eval()
+		public bool Eval(Action<object>? logger, bool? mend)
 		{
 			return true;
 		}
@@ -321,12 +329,6 @@ public sealed partial class PredicateInlay
 			myCallback = null;
 		}
 		/// <inheritdoc/>
-		public bool Eval()
-		{
-			return myCallback?.Invoke() ?? true;
-		}
-
-		/// <inheritdoc/>
 		public void Populate(del_FetchPred? exchanger)
 		{
 			myCallback = exchanger?.Invoke(funcName, args);
@@ -336,6 +338,22 @@ public sealed partial class PredicateInlay
 		public override string ToString()
 		{
 			return funcName + "(" + (args.Length == 0 ? string.Empty : args.Aggregate((x, y) => $"{x}, {y}")) + ")";
+		}
+		/// <inheritdoc/>
+		public bool Eval(Action<object>? logger, bool? mend)
+		{
+			try {
+				return myCallback?.Invoke() ?? true;
+			}
+			catch (Exception ex){
+				if (logger is not null){
+					logger($"Error on leaf eval: {ex.Message}");
+				}
+				if (mend is not null){
+					myCallback = delegate { return mend.Value; };
+				}
+			}
+			return true;
 		}
 	}
 	/// <summary>
@@ -353,10 +371,12 @@ public sealed partial class PredicateInlay
 		/// </summary>
 		/// <returns></returns>
 		/// <exception cref="InvalidOperationException"></exception>
-		public bool Eval()
+
+		public bool Eval(Action<object>? logger, bool? mend)
 		{
 			throw new InvalidOperationException("Groups should not exist!");
 		}
+
 		/// <summary>
 		/// Throws <see cref="InvalidOperationException"/>.
 		/// </summary>
@@ -396,14 +416,14 @@ public sealed partial class PredicateInlay
 			R = null;
 		}
 		/// <inheritdoc/>
-		public bool Eval()
+		public bool Eval(Action<object>? logger, bool? mend)
 		{
 			return TP switch
 			{
-				Op.AND => (L?.Eval() ?? true) && (R?.Eval() ?? true),
-				Op.OR => (L?.Eval() ?? true) || (R?.Eval() ?? true),
-				Op.XOR => (L?.Eval() ?? true) ^ (R?.Eval() ?? true),
-				Op.NOT => !(R?.Eval() ?? true),
+				Op.AND => (L?.Eval(logger, mend) ?? true) && (R?.Eval(logger, mend) ?? true),
+				Op.OR => (L?.Eval(logger, mend) ?? true) || (R?.Eval(logger, mend) ?? true),
+				Op.XOR => (L?.Eval(logger, mend) ?? true) ^ (R?.Eval(logger, mend) ?? true),
+				Op.NOT => !(R?.Eval(logger, mend) ?? true),
 				_ => throw new ArgumentException("Invalid operator"),
 			};
 		}
@@ -565,7 +585,8 @@ public sealed partial class PredicateInlay
 	{
 		return tt switch
 		{
-			//todo: decide on delims usage
+			//~~decide on delims usage
+			//they stay as they are
 			TokenType.DelimOpen => new Regex("[([{]", regexops),
 			TokenType.DelimClose => new Regex("[)\\]}]", regexops),
 			TokenType.Separator => new Regex("[\\s,]+", regexops),
