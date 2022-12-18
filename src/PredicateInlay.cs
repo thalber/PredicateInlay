@@ -574,7 +574,7 @@ public sealed partial class PredicateInlay
 	/// <summary>
 	/// Modify regex options
 	/// </summary>
-	public static RegexOptions regexops = RegexOptions.None;
+	public static RegexOptions regexops = RegexOptions.IgnoreCase;
 	/// <summary>
 	/// Returns a recognition regex object for a given token type.
 	/// </summary>
