@@ -342,14 +342,18 @@ public sealed partial class PredicateInlay
 		/// <inheritdoc/>
 		public bool Eval(Action<object>? logger, bool? mend)
 		{
-			try {
+			try
+			{
 				return myCallback?.Invoke() ?? true;
 			}
-			catch (Exception ex){
-				if (logger is not null){
+			catch (Exception ex)
+			{
+				if (logger is not null)
+				{
 					logger($"Error on leaf eval: {ex.Message}");
 				}
-				if (mend is not null){
+				if (mend is not null)
+				{
 					myCallback = delegate { return mend.Value; };
 				}
 			}
